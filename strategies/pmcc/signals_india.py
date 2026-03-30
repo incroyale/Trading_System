@@ -18,6 +18,7 @@ class IndiaPMCC:
         self.long_calls = None
         self.short_calls = None
         self.tokens = None
+        self.latest = {}
 
     def get_iv_stats(self):
         """
@@ -81,10 +82,22 @@ class IndiaPMCC:
         temp = pd.concat([long_calls, short_calls])
         self.tokens = list(temp['token'])
 
+    def start_live_feed(self):
+        latest = {}
+        token_list = [{"exchangeType": 2, "tokens": self.tokens}]
 
-    def filter_long_short_calls(self):
-        LIQUIDITY_KEYS = ['last_traded_quantity', 'average_traded_price', 'volume_trade_for_the_day', 'total_buy_quantity', 'total_sell_quantity',
-                          'open_price_of_the_day', 'high_price_of_the_day', 'low_price_of_the_day', 'last_traded_timestamp', 'open_interest']
+        def on_data(wsapp, message):
+            token = message['token']
+            latest[token] = message
+
+        self.broker.start_ws(token_list=token_list, mode=3, on_data=on_data)
+        self.latest = latest  # shared state, updates in background
+
+    def get_filtered_dfs(self):
+        LIQUIDITY_KEYS = ['last_traded_quantity', 'average_traded_price', 'volume_trade_for_the_day',
+                          'total_buy_quantity', 'total_sell_quantity', 'open_price_of_the_day',
+                          'high_price_of_the_day', 'low_price_of_the_day', 'last_traded_timestamp',
+                          'open_interest']
 
         def is_valid_tick(tick):
             if not all(tick.get(k, 0) != 0 for k in LIQUIDITY_KEYS):
@@ -95,18 +108,11 @@ class IndiaPMCC:
                 return False
             return True
 
-        latest = {}
-        token_list = [{"exchangeType": 2, "tokens": self.tokens}]
-        def on_data(wsapp, message):
-            token = message['token']
-            latest[token] = message
-        self.broker.start_ws(token_list=token_list, mode=3, on_data=on_data)
-        latest = {token: tick for token, tick in latest.items() if is_valid_tick(tick)}
+        latest = {t: tick for t, tick in self.latest.items() if is_valid_tick(tick)}
         long_tokens = set(self.long_calls['token'].astype(str).tolist())
         short_tokens = set(self.short_calls['token'].astype(str).tolist())
-        long_df = {token: tick for token, tick in latest.items() if token in long_tokens}
-        short_df = {token: tick for token, tick in latest.items() if token in short_tokens}
-        # Separate logic for long and short options here... (Greeks filtering)
+        long_df = {t: tick for t, tick in latest.items() if t in long_tokens}
+        short_df = {t: tick for t, tick in latest.items() if t in short_tokens}
         return long_df, short_df
 
 

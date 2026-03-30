@@ -5,7 +5,10 @@ import pandas as pd
 
 app = Dash(__name__)
 obj = IndiaPMCC()
+
+# Run once at startup
 obj.get_long_short_df()
+obj.start_live_feed()  # WebSocket stays open in background
 
 def ticks_to_df(ticks_dict, calls_df):
     rows = []
@@ -61,7 +64,7 @@ def make_expiry_tables(df, label, header_color):
     for i, expiry in enumerate(expiries):
         subset = df[df['expiry'] == expiry].drop(columns=['expiry']).reset_index(drop=True)
         card = html.Div(
-            style={"flex": "1 1 30%", "minWidth": "280px", "maxWidth": "33%",
+            style={"flex": "1 1 45%", "minWidth": "280px", "maxWidth": "49%",
                    "backgroundColor": "#1a1a1a", "borderRadius": "8px",
                    "border": "1px solid #333", "padding": "12px", "boxSizing": "border-box"},
             children=[
@@ -75,7 +78,7 @@ def make_expiry_tables(df, label, header_color):
             ]
         )
         row.append(card)
-        if len(row) == 3 or i == len(expiries) - 1:
+        if len(row) == 2 or i == len(expiries) - 1:
             blocks.append(html.Div(row, style={"display": "flex", "flexWrap": "wrap",
                                                "gap": "12px", "marginBottom": "12px"}))
             row = []
@@ -108,16 +111,16 @@ app.layout = html.Div(
 )
 
 @app.callback(
-    Output("current-iv",     "children"),
-    Output("iv-rank",        "children"),
-    Output("iv-pct",         "children"),
+    Output("current-iv",        "children"),
+    Output("iv-rank",           "children"),
+    Output("iv-pct",            "children"),
     Output("long-call-tables",  "children"),
     Output("short-call-tables", "children"),
     Input("interval", "n_intervals"))
 def refresh(_):
     iv, iv_rank, iv_pct = obj.get_iv_stats()
 
-    long_df, short_df = obj.filter_long_short_calls()
+    long_df, short_df = obj.get_filtered_dfs()  # just reads from self.latest, no WS open/close
     long_call  = ticks_to_df(long_df,  obj.long_calls)
     short_call = ticks_to_df(short_df, obj.short_calls)
 
