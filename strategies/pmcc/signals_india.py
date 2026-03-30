@@ -12,8 +12,12 @@ class IndiaPMCC:
         self.iv_pct = None
         self.greeks = None
         self.spot = None
+        self.broker = BrokerConnection()
         self.connection = BrokerConnection().get_client()
         self.spot = None
+        self.long_calls = None
+        self.short_calls = None
+        self.tokens = None
 
     def get_iv_stats(self):
         """
@@ -72,8 +76,39 @@ class IndiaPMCC:
 
         short_calls = nifty[(nifty['strike'] >= self.spot) & (nifty['strike'] <= self.spot * 1.3) &
                     (nifty['expiry'] >= today + pd.Timedelta(days=10)) & (nifty['expiry'] <= today + pd.Timedelta(days=30))].copy()
+        self.long_calls = long_calls
+        self.short_calls = short_calls
+        temp = pd.concat([long_calls, short_calls])
+        self.tokens = list(temp['token'])
 
-        return self.spot, short_calls, long_calls
+
+    def filter_long_short_calls(self):
+        LIQUIDITY_KEYS = ['last_traded_quantity', 'average_traded_price', 'volume_trade_for_the_day', 'total_buy_quantity', 'total_sell_quantity',
+                          'open_price_of_the_day', 'high_price_of_the_day', 'low_price_of_the_day', 'last_traded_timestamp', 'open_interest']
+
+        def is_valid_tick(tick):
+            if not all(tick.get(k, 0) != 0 for k in LIQUIDITY_KEYS):
+                return False
+            if sum(1 for d in tick.get('best_5_sell_data', []) if d['price'] != 0 and d['quantity'] != 0) < 3:
+                return False
+            if sum(1 for d in tick.get('best_5_buy_data', []) if d['price'] != 0 and d['quantity'] != 0) < 3:
+                return False
+            return True
+
+        latest = {}
+        token_list = [{"exchangeType": 2, "tokens": self.tokens}]
+        def on_data(wsapp, message):
+            token = message['token']
+            latest[token] = message
+        self.broker.start_ws(token_list=token_list, mode=3, on_data=on_data)
+        latest = {token: tick for token, tick in latest.items() if is_valid_tick(tick)}
+        long_tokens = set(self.long_calls['token'].astype(str).tolist())
+        short_tokens = set(self.short_calls['token'].astype(str).tolist())
+        long_df = {token: tick for token, tick in latest.items() if token in long_tokens}
+        short_df = {token: tick for token, tick in latest.items() if token in short_tokens}
+        # Separate logic for long and short options here... (Greeks filtering)
+        return long_df, short_df
+
 
 
 if __name__ == "__main__":

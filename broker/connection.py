@@ -4,6 +4,7 @@ from pyotp import TOTP
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from dotenv import load_dotenv
 import os
+import threading
 
 load_dotenv()
 API_KEY   = os.getenv("API_KEY")
@@ -35,25 +36,21 @@ class BrokerConnection:
         return self.client
 
     # ------------------ WEBSOCKET ------------------
-    def start_ws(self, token_list, mode=1, correlation_id="abcd",
-                 on_data=None, on_open=None, on_close=None, on_error=None):
-
+    def start_ws(self, token_list, mode=1, correlation_id="abcd", action=1, on_data=None, on_open=None, on_close=None,
+                 on_error=None):
         self.sws = SmartWebSocketV2(self.authToken, API_KEY, CLIENT_CODE, self.feedToken, max_retry_attempt=5)
-        if on_data: self.sws.on_data = on_data
-        if on_open: self.sws.on_open = on_open
+        if on_data:  self.sws.on_data = on_data
         if on_close: self.sws.on_close = on_close
         if on_error: self.sws.on_error = on_error
 
-        # Default on_open subscribes
         def default_on_open(wsapp):
             print("WebSocket opened")
             self.sws.subscribe(correlation_id, mode, token_list)
 
-        if on_open is None:
-            self.sws.on_open = default_on_open
-
-        # Blocking connect
-        self.sws.connect()
+        self.sws.on_open = on_open if on_open else default_on_open
+        self.ws_thread = threading.Thread(target=self.sws.connect)
+        self.ws_thread.daemon = True
+        self.ws_thread.start()
 
     def close_ws(self):
         if self.sws:
