@@ -18,11 +18,17 @@ def ticks_to_df(ticks_dict, calls_df):
         match = calls_df[calls_df['token'] == token]
         if match.empty:
             continue
+        bid = tick['best_5_buy_data'][0]['price']  / 100 if tick.get('best_5_buy_data')  else None
+        ask = tick['best_5_sell_data'][0]['price'] / 100 if tick.get('best_5_sell_data') else None
+        spread = round(ask - bid, 2) if bid and ask else None
         rows.append({
             'token':      token,
             'strike':     match['strike'].values[0],
             'expiry':     match['expiry'].values[0],
             'ltp':        tick.get('last_traded_price', 0) / 100,
+            'bid':        bid,
+            'ask':        ask,
+            'spread':     spread,
             'day_volume': tick.get('volume_trade_for_the_day', 0),
             'total_buy':  tick.get('total_buy_quantity', 0),
             'total_sell': tick.get('total_sell_quantity', 0),
@@ -34,8 +40,7 @@ def ticks_to_df(ticks_dict, calls_df):
         df = df.sort_values(['expiry', 'strike']).reset_index(drop=True)
     return df
 
-COL_WIDTHS = {"token": 90, "strike": 80, "ltp": 80, "day_volume": 100, "total_buy": 90, "total_sell": 90, "oi": 90}
-
+COL_WIDTHS = {"token": 90, "strike": 80, "ltp": 80, "bid": 80, "ask": 80, "spread": 75, "day_volume": 100, "total_buy": 90, "total_sell": 90, "oi": 90}
 def make_columns(df):
     return [{"name": c, "id": c} for c in df.columns]
 

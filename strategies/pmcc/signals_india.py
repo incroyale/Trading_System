@@ -73,7 +73,7 @@ class IndiaPMCC:
         self.spot = self.connection.ltpData(exchange="NSE", tradingsymbol="NIFTY", symboltoken="99926000")['data']['ltp']
         today = pd.to_datetime('today').normalize()
         long_calls = nifty[(nifty['strike'] >= self.spot * 0.60) & (nifty['strike'] <= self.spot) &
-                    (nifty['expiry'] >= today + pd.Timedelta(days=90)) & (nifty['expiry'] <= today + pd.Timedelta(days=150))].copy()
+                    (nifty['expiry'] >= today + pd.Timedelta(days=90)) & (nifty['expiry'] <= today + pd.Timedelta(days=540))].copy()
 
         short_calls = nifty[(nifty['strike'] >= self.spot) & (nifty['strike'] <= self.spot * 1.3) &
                     (nifty['expiry'] >= today + pd.Timedelta(days=10)) & (nifty['expiry'] <= today + pd.Timedelta(days=30))].copy()
@@ -114,15 +114,3 @@ class IndiaPMCC:
         long_df = {t: tick for t, tick in latest.items() if t in long_tokens}
         short_df = {t: tick for t, tick in latest.items() if t in short_tokens}
         return long_df, short_df
-
-
-
-if __name__ == "__main__":
-    obj = IndiaPMCC()
-    a, b, c = obj.get_iv_stats()
-    print(a, b, c)
-    print(obj.get_greeks_df())
-    print(obj.get_pcr_df())
-
-
-
