@@ -3,7 +3,7 @@ from dash import Dash, html, dcc, dash_table, ctx
 from dash.dependencies import Input, Output, State
 from strategies.pmcc.signals_india import IndiaPMCC
 from strategies.credit_spread.signals_india import IndiaCreditSpreads
-from db.portfolio import init_db, log_trade, get_trades, start_ltp_polling, clear_all_trades, get_total_pnl
+from dashboard.portfolio import init_db, log_trade, get_trades, start_ltp_polling, clear_all_trades, get_total_pnl
 import pandas as pd
 
 app = Dash(__name__)
