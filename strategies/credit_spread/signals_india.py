@@ -1,5 +1,7 @@
+# credit_spread/signals_india.py
 import pandas as pd
-import time
+from strategies.credit_spread.spread_builder import build_spread_candidates
+import datetime
 
 
 class IndiaCreditSpreads:
@@ -11,7 +13,8 @@ class IndiaCreditSpreads:
         self._base_calls = None
         self.greeks_cache = None
         self.spread_tokens = []
-        self.spread_latest = {}  # will be pointed at obj.latest from ui.py
+        self.spread_latest = {}  # will be pointed at obj.latest from app.py
+        self.greeks_ready = False
 
     def load_from_pmcc(self, pmcc_raw_calls, min_dte=15, max_dte=45):
         today = pd.to_datetime('today').normalize()
@@ -39,29 +42,37 @@ class IndiaCreditSpreads:
         self.raw_calls = self._base_calls[self._base_calls['token'].astype(str).isin(valid_tokens)]
 
     def apply_greeks_filters(self, pmcc_greeks_cache):
-        self.greeks_cache = pmcc_greeks_cache
-        df = self.raw_calls.copy()
-        df['strike']     = df['strike'].round(2)
-        df['expiry_str'] = df['expiry'].dt.strftime('%d%b%Y').str.upper()
-        df = df.merge(self.greeks_cache, on=['strike', 'expiry_str'], how='left').drop(columns=['expiry_str'])
-        rows = []
-        for _, row in df.iterrows():
-            tick = self.spread_latest.get(str(row['token']))
-            if tick is None:
-                continue
-            bid = tick['best_5_buy_data'][0]['price'] / 100 if tick.get('best_5_buy_data') else None
-            ask = tick['best_5_sell_data'][0]['price'] / 100 if tick.get('best_5_sell_data') else None
-            row['ltp']        = tick.get('last_traded_price', 0) / 100
-            row['bid']        = bid
-            row['ask']        = ask
-            row['spread']     = round(ask - bid, 4) if bid and ask else None
-            row['day_volume'] = tick.get('volume_trade_for_the_day', 0)
-            row['oi']         = tick.get('open_interest', 0)
-            rows.append(row)
-        df = pd.DataFrame(rows)
-        df = df[(df['delta'] >= 0.08) & (df['delta'] <= 0.30)]
-        df = df[df['spread'] <= 4]
-        self.raw_calls = df
+        try:
+            self.greeks_cache = pmcc_greeks_cache
+            df = self.raw_calls.copy()
+            df['strike'] = df['strike'].round(2)
+            df['expiry_str'] = df['expiry'].dt.strftime('%d%b%Y').str.upper()
+            df = df.merge(self.greeks_cache, on=['strike', 'expiry_str'], how='left').drop(columns=['expiry_str'])
+            rows = []
+            for _, row in df.iterrows():
+                tick = self.spread_latest.get(str(row['token']))
+                if tick is None:
+                    continue
+                bid = tick['best_5_buy_data'][0]['price'] / 100 if tick.get('best_5_buy_data') else None
+                ask = tick['best_5_sell_data'][0]['price'] / 100 if tick.get('best_5_sell_data') else None
+                row['ltp'] = tick.get('last_traded_price', 0) / 100
+                row['bid'] = bid
+                row['ask'] = ask
+                row['spread'] = round(ask - bid, 4) if bid and ask else None
+                row['day_volume'] = tick.get('volume_trade_for_the_day', 0)
+                row['oi'] = tick.get('open_interest', 0)
+                rows.append(row)
+            df = pd.DataFrame(rows)
+            if df.empty:
+                return  # don't clobber existing good data
+            df = df[(df['delta'] >= 0.08) & (df['delta'] <= 0.30)]
+            df = df[df['spread'] <= 4]
+            if df.empty:
+                return  # same — don't overwrite with empty
+            self.raw_calls = df
+            self.greeks_ready = True  # only set True on clean success
+        except Exception as e:
+            print(f"[apply_greeks_filters] failed, keeping last good data: {e}")
 
     def get_tick_data(self):
         """Attach live tick data to raw_calls without requiring greeks."""
@@ -83,3 +94,12 @@ class IndiaCreditSpreads:
             row['oi']         = tick.get('open_interest', 0)
             rows.append(row)
         return pd.DataFrame(rows)
+
+    def get_spread_candidates(self, filters: dict, max_margin=None):
+        candidates, dte_map = {}, {}
+        today = datetime.date.today()
+        for expiry, df in self.raw_calls.groupby('expiry'):
+            expiry_str = pd.to_datetime(expiry).strftime('%d %b %Y')
+            candidates[expiry_str] = df.reset_index(drop=True)
+            dte_map[expiry_str] = max((pd.to_datetime(expiry).date() - today).days, 1)
+        return build_spread_candidates(candidates, dte_map, filters, connection=self.connection, max_margin=max_margin)

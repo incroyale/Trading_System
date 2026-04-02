@@ -1,3 +1,4 @@
+# db/portfolio.py
 import sqlite3
 import threading
 import time
@@ -43,3 +44,12 @@ def start_ltp_polling(connection, interval=2):
                 print(f"[poll loop] {e}")
             time.sleep(interval)
     threading.Thread(target=_loop, daemon=True).start()
+
+def clear_all_trades():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM trades")
+
+def get_total_pnl():
+    with sqlite3.connect(DB_PATH) as conn:
+        result = conn.execute("SELECT SUM(pnl) FROM trades").fetchone()
+        return result[0] or 0.0
