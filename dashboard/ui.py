@@ -1,13 +1,14 @@
-from dash import Dash, html, dcc, dash_table
-from dash.dependencies import Input, Output
+from dash import Dash, html, dcc, dash_table, ctx
+from dash.dependencies import Input, Output, State
 from strategies.pmcc.signals_india import IndiaPMCC
 from strategies.credit_spread.signals_india import IndiaCreditSpreads
+from db.portfolio import init_db, log_trade, get_trades, start_ltp_polling
 import pandas as pd
 
 app = Dash(__name__)
 
 # ── shared objects ────────────────────────────────────────────────────────────
-obj  = IndiaPMCC()
+obj = IndiaPMCC()
 obj.get_long_short_df()
 obj.start_live_feed()
 obj.start_greeks_refresh(interval_seconds=15)
@@ -15,7 +16,7 @@ obj.iv_stats = obj.get_iv_stats()
 
 cs = IndiaCreditSpreads(broker=obj.broker, connection=obj.connection)
 cs.load_from_pmcc(obj.raw_calls)
-cs.start_spread_feed()
+cs.spread_latest = obj.latest  # shared ws, no second connection
 
 # hook credit-spreads greek filter into PMCC's refresh loop
 _orig_refresh = obj._refresh_greeks_cache
@@ -25,6 +26,10 @@ def _patched_refresh():
         cs.get_filtered_dfs()
         cs.apply_greeks_filters(obj.greeks_cache)
 obj._refresh_greeks_cache = _patched_refresh
+
+# ── portfolio db + polling ────────────────────────────────────────────────────
+init_db()
+start_ltp_polling(obj.connection, interval=2)
 
 # ── shared helpers ────────────────────────────────────────────────────────────
 COL_WIDTHS = {
@@ -89,9 +94,43 @@ def format_expiry(df):
         df['expiry'] = pd.to_datetime(df['expiry']).dt.strftime('%d %b %Y')
     return df
 
+def input_box(label, id, placeholder, width="120px"):
+    return html.Div([
+        html.Label(label, style={"color": "#aaa", "fontSize": "12px", "marginBottom": "4px", "display": "block"}),
+        dcc.Input(id=id, placeholder=placeholder, debounce=False,
+                  style={"backgroundColor": "#111", "color": "white", "border": "1px solid #444",
+                         "padding": "6px 8px", "fontFamily": "Courier", "fontSize": "13px",
+                         "width": width, "display": "block"}),
+    ])
+
+def trade_entry_panel():
+    return html.Div(
+        style={"backgroundColor": "#1a1a1a", "padding": "16px", "borderRadius": "8px",
+               "border": "1px solid #333", "marginBottom": "24px", "display": "flex",
+               "gap": "12px", "alignItems": "flex-end", "flexWrap": "wrap"},
+        children=[
+            input_box("Exchange",       "p-exchange", "NSE",     width="80px"),
+            input_box("Trading Symbol", "p-symbol",   "SBIN-EQ", width="140px"),
+            input_box("Symbol Token",   "p-token",    "3045",    width="100px"),
+            html.Button("BUY",  id="btn-buy",  n_clicks=0,
+                        style={"backgroundColor": "#1a3a1a", "color": "#00e676",
+                               "border": "1px solid #00e676", "padding": "8px 20px",
+                               "fontFamily": "Courier", "cursor": "pointer",
+                               "fontWeight": "bold", "fontSize": "13px"}),
+            html.Button("SELL", id="btn-sell", n_clicks=0,
+                        style={"backgroundColor": "#3a1a1a", "color": "#ff5252",
+                               "border": "1px solid #ff5252", "padding": "8px 20px",
+                               "fontFamily": "Courier", "cursor": "pointer",
+                               "fontWeight": "bold", "fontSize": "13px"}),
+            html.Div(id="trade-status",
+                     style={"color": "#aaa", "fontFamily": "Courier",
+                            "fontSize": "13px", "alignSelf": "center"}),
+        ]
+    )
+
 # ── layout ────────────────────────────────────────────────────────────────────
-TAB_STYLE        = {"backgroundColor": "#111", "color": "#aaa",  "border": "1px solid #333"}
-TAB_SELECTED     = {"backgroundColor": "#1a1a1a", "color": "white", "border": "1px solid #555"}
+TAB_STYLE    = {"backgroundColor": "#111", "color": "#aaa",   "border": "1px solid #333"}
+TAB_SELECTED = {"backgroundColor": "#1a1a1a", "color": "white", "border": "1px solid #555"}
 
 app.layout = html.Div(
     style={"backgroundColor": "#111", "padding": "20px", "fontFamily": "Courier"},
@@ -102,6 +141,7 @@ app.layout = html.Div(
             style={"marginBottom": "20px"},
             colors={"background": "#111", "primary": "#00e5ff", "border": "#333"},
             children=[
+
                 # ── PMCC tab ──────────────────────────────────────────────────
                 dcc.Tab(label="PMCC", value="pmcc",
                         style=TAB_STYLE, selected_style=TAB_SELECTED,
@@ -132,6 +172,16 @@ app.layout = html.Div(
                                     style={"color": "white", "marginBottom": "12px"}),
                             html.Div(id="cs-tables"),
                         ]),
+
+                # ── Portfolio tab ─────────────────────────────────────────────
+                dcc.Tab(label="Portfolio", value="portfolio",
+                        style=TAB_STYLE, selected_style=TAB_SELECTED,
+                        children=[
+                            html.H2("Paper Trade Portfolio",
+                                    style={"color": "white", "marginBottom": "16px"}),
+                            trade_entry_panel(),
+                            html.Div(id="portfolio-table"),
+                        ]),
             ]
         ),
 
@@ -141,11 +191,11 @@ app.layout = html.Div(
 
 # ── callbacks ─────────────────────────────────────────────────────────────────
 @app.callback(
-    Output("current-iv",       "children"),
-    Output("iv-rank",          "children"),
-    Output("iv-pct",           "children"),
-    Output("long-call-tables", "children"),
-    Output("short-call-tables","children"),
+    Output("current-iv",        "children"),
+    Output("iv-rank",           "children"),
+    Output("iv-pct",            "children"),
+    Output("long-call-tables",  "children"),
+    Output("short-call-tables", "children"),
     Input("interval", "n_intervals"))
 def refresh_pmcc(_):
     iv, iv_rank, iv_pct = obj.iv_stats
@@ -164,7 +214,9 @@ def refresh_pmcc(_):
     Output("cs-tables", "children"),
     Input("interval", "n_intervals"))
 def refresh_cs(_):
-    df = cs.raw_calls.copy() if cs.raw_calls is not None else pd.DataFrame()
+    df = cs.get_tick_data() if hasattr(cs, 'get_tick_data') else (
+        cs.raw_calls.copy() if cs.raw_calls is not None else pd.DataFrame()
+    )
     if df.empty:
         return [html.P("Waiting for data...", style={"color": "#aaa"})]
     desired = ['token', 'strike', 'expiry', 'ltp', 'bid', 'ask', 'spread',
@@ -173,6 +225,53 @@ def refresh_cs(_):
     df = df[cols]
     format_expiry(df)
     return make_expiry_tables(df, "Credit Spread", "#a0e080")
+
+@app.callback(
+    Output("trade-status", "children"),
+    Input("btn-buy",  "n_clicks"),
+    Input("btn-sell", "n_clicks"),
+    State("p-exchange", "value"),
+    State("p-symbol",   "value"),
+    State("p-token",    "value"),
+    prevent_initial_call=True)
+def log_trade_cb(buy_clicks, sell_clicks, exchange, symbol, token):
+    if not exchange or not symbol or not token:
+        return "⚠ Fill all fields"
+    try:
+        result = obj.connection.ltpData(exchange=exchange, tradingsymbol=symbol, symboltoken=token)
+        ltp = result['data']['ltp']
+        side = "BUY" if ctx.triggered_id == "btn-buy" else "SELL"
+        log_trade(exchange, symbol, token, side, ltp)
+        return f"✓ {side} {symbol} @ {ltp}"
+    except Exception as e:
+        return f"✗ {e}"
+
+@app.callback(
+    Output("portfolio-table", "children"),
+    Input("interval", "n_intervals"))
+def refresh_portfolio(_):
+    df = get_trades()
+    if df.empty:
+        return html.P("No trades yet.", style={"color": "#aaa", "fontFamily": "Courier"})
+    style_data_conditional = [
+        {"if": {"row_index": "odd"}, "backgroundColor": "#1a1a1a"},
+        *[{"if": {"filter_query": f"{{id}} = {row['id']}", "column_id": "pnl"},
+           "color": "#00e676" if row['pnl'] >= 0 else "#ff5252"}
+          for _, row in df.iterrows()]
+    ]
+    return dash_table.DataTable(
+        columns=[{"name": c, "id": c} for c in df.columns],
+        data=df.to_dict("records"),
+        style_table={"overflowX": "auto"},
+        style_header={"backgroundColor": "#222", "color": "#a0e080", "fontWeight": "bold",
+                      "border": "1px solid #333", "whiteSpace": "nowrap"},
+        style_cell={"backgroundColor": "#111", "color": "white", "border": "1px solid #222",
+                    "fontFamily": "Courier", "fontSize": "13px", "padding": "6px 10px",
+                    "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis"},
+        style_data_conditional=style_data_conditional,
+        sort_action="native",
+        page_size=20,
+    )
 
 if __name__ == "__main__":
     app.run(debug=False)
