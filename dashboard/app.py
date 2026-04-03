@@ -39,8 +39,7 @@ start_ltp_polling(obj.connection, interval=2)
 COL_WIDTHS = {
     "token": 108, "strike": 96, "ltp": 96, "bid": 96, "ask": 96, "spread": 90,
     "day_volume": 120, "total_buy": 108, "total_sell": 108, "oi": 108,
-    "iv": 84, "delta": 84, "gamma": 84, "theta": 90, "vega": 84,
-}
+    "iv": 84, "delta": 84, "gamma": 84, "theta": 90, "vega": 84,}
 
 def make_columns(df):
     return [{"name": c, "id": c} for c in df.columns]
