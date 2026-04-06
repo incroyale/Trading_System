@@ -36,9 +36,8 @@ class BrokerConnection:
         return self.client
 
     # ------------------ WEBSOCKET ------------------
-    def start_ws(self, token_list, mode=1, correlation_id="abcd", action=1, on_data=None, on_open=None, on_close=None,
-                 on_error=None):
-        self.sws = SmartWebSocketV2(self.authToken, API_KEY, CLIENT_CODE, self.feedToken, max_retry_attempt=5)
+    def start_ws(self, token_list, mode=1, correlation_id="abcd", action=1, on_data=None, on_open=None, on_close=None, on_error=None):
+        self.sws = SmartWebSocketV2(self.authToken, API_KEY, CLIENT_CODE, self.feedToken, max_retry_attempt=10)
         if on_data:  self.sws.on_data = on_data
         if on_close: self.sws.on_close = on_close
         if on_error: self.sws.on_error = on_error

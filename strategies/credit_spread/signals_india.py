@@ -102,4 +102,4 @@ class IndiaCreditSpreads:
             expiry_str = pd.to_datetime(expiry).strftime('%d %b %Y')
             candidates[expiry_str] = df.reset_index(drop=True)
             dte_map[expiry_str] = max((pd.to_datetime(expiry).date() - today).days, 1)
-        return build_spread_candidates(candidates, dte_map, filters, connection=self.connection, max_margin=max_margin)
+        return build_spread_candidates(candidates, dte_map, filters)

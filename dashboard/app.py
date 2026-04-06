@@ -141,11 +141,6 @@ app.layout = html.Div(
                             html.H2("Candidate Credit Spread Legs", style={"color": "white", "marginBottom": "12px"}),
                             html.Div(id="cs-tables"),
                         ]),
-                dcc.Tab(label="Spread Pairs", value="spread-pairs", style=TAB_STYLE, selected_style=TAB_SELECTED,
-                        children=[
-                            html.H2("Bear Call Spread Candidates", style={"color": "white", "marginBottom": "12px"}),
-                            html.Div(id="spread-pairs-tables"),
-                        ]),
                 dcc.Tab(label="Portfolio", value="portfolio", style=TAB_STYLE, selected_style=TAB_SELECTED,
                         children=[
                             html.H2("Paper Trade Portfolio", style={"color": "white", "marginBottom": "16px"}),
@@ -239,55 +234,6 @@ def show_confirm(_):
 def do_clear(_):
     clear_all_trades()
     return "✓ All trades cleared", {"display": "none"}
-
-FILTERS = {
-    'pop'         : (None, None),
-    'max_loss'    : (None, None),
-    'max_profit'  : (None, None),
-    'delta'       : (None, None),
-    'theta'       : (None, None),
-    'vega'        : (None, None),
-    'reward_risk' : (None, None),
-}
-
-@app.callback(Output("spread-pairs-tables", "children"), Input("interval", "n_intervals"))
-def refresh_spread_pairs(_):
-    if not cs.greeks_ready:
-        return [html.P("⏳ Waiting for Greeks...", style={"color": "#aaa", "fontFamily": "Courier"})]
-    if cs.raw_calls is None or cs.raw_calls.empty:
-        return [html.P("Waiting for data...", style={"color": "#aaa"})]
-    try:
-        candidates = cs.get_spread_candidates(FILTERS, max_margin=100000)
-    except Exception as e:
-        return [html.P(f"Error: {e}", style={"color": "#ff5252", "fontFamily": "Courier"})]
-    if not candidates:
-        return [html.P("No pairs passed filters.", style={"color": "#aaa"})]
-
-    blocks = []
-    for expiry, df in candidates.items():
-        df = df.copy()
-        for col in ['delta', 'gamma', 'theta', 'vega', 'pop', 'reward_risk']:
-            if col in df.columns:
-                df[col] = df[col].round(4)
-        card = html.Div(
-            style={"backgroundColor": "#1a1a1a", "borderRadius": "8px", "border": "1px solid #333", "padding": "12px", "marginBottom": "12px"},
-            children=[
-                html.H4(f"Bear Call Spread — {expiry}", style={"color": "#f0c040", "margin": "0 0 8px 0", "fontSize": "13px"}),
-                dash_table.DataTable(
-                    columns=[{"name": c, "id": c} for c in df.columns],
-                    data=df.to_dict("records"),
-                    **table_style("#f0c040"),
-                    style_data_conditional=[
-                        {"if": {"row_index": "odd"}, "backgroundColor": "#1a1a1a"},
-                        {"if": {"column_id": "max_profit"}, "color": "#00e676"},
-                        {"if": {"column_id": "max_loss"},   "color": "#ff5252"},
-                        {"if": {"column_id": "pop"},        "color": "#00e5ff"},
-                    ],
-                )
-            ]
-        )
-        blocks.append(card)
-    return blocks
 
 if __name__ == "__main__":
     app.run(debug=False)
