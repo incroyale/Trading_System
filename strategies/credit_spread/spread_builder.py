@@ -144,9 +144,9 @@ def build_spread_candidates(candidates_by_expiry, days_to_expiry, filters, conne
 def get_margin(connection, sell_token, buy_token, qty=65):
     try:
         resp = connection.getMarginApi({"positions":[
-            {"exchange": "NFO", "qty": qty, "price": 0, "productType": "INTRADAY",
+            {"exchange": "NFO", "qty": qty, "price": 0, "productType": "CARRYFORWARD",
              "token": str(sell_token), "tradeType": "SELL", "orderType": "MARKET"},
-            {"exchange": "NFO", "qty": qty, "price": 0, "productType": "INTRADAY",
+            {"exchange": "NFO", "qty": qty, "price": 0, "productType": "CARRYFORWARD",
              "token": str(buy_token), "tradeType": "BUY", "orderType": "MARKET"},
         ]})
         if resp.get("status"):
