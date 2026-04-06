@@ -33,6 +33,22 @@ def _patched_refresh():
 obj._refresh_greeks_cache = _patched_refresh
 
 os.makedirs("data", exist_ok=True)
+def _write_csv_loop():
+    # Manually delete for now
+    while True:
+        try:
+            df = cs.get_tick_data()
+            if df is not None and not df.empty:
+                desired = ['token', 'strike', 'expiry', 'ltp', 'bid', 'ask', 'spread', 'day_volume', 'oi', 'iv', 'delta', 'gamma', 'theta', 'vega']
+                df = df[[c for c in desired if c in df.columns]]
+                for expiry, group in df.groupby('expiry'):
+                    expiry_str = pd.to_datetime(expiry).strftime('%d_%b_%Y')
+                    group.to_csv(os.path.join("data", f"{expiry_str}.csv"), index=False)
+        except Exception as e:
+            print(f"[csv writer] {e}")
+        threading.Event().wait(15)
+
+threading.Thread(target=_write_csv_loop, daemon=True).start()
 
 # ── portfolio db + polling ────────────────────────────────────────────────────
 init_db()
