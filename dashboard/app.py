@@ -94,7 +94,7 @@ def trade_entry_panel():
         style={"backgroundColor": "#1a1a1a", "padding": "16px", "borderRadius": "8px", "border": "1px solid #333", "marginBottom": "24px", "display": "flex", "gap": "12px", "alignItems": "flex-end", "flexWrap": "wrap"},
         children=[
             input_box("Exchange",       "p-exchange", "NFO",     width="80px"),
-            input_box("Trading Symbol", "p-symbol",   "NIFTY28APR2026C26000", width="200px"),
+            input_box("Trading Symbol", "p-symbol",   "NIFTY", width="140px"),
             input_box("Symbol Token",   "p-token",    "7000",    width="100px"),
             html.Button("BUY",  id="btn-buy",  n_clicks=0, style={"backgroundColor": "#1a3a1a", "color": "#00e676", "border": "1px solid #00e676", "padding": "8px 20px", "fontFamily": "Courier", "cursor": "pointer", "fontWeight": "bold", "fontSize": "13px"}),
             html.Button("SELL", id="btn-sell", n_clicks=0, style={"backgroundColor": "#3a1a1a", "color": "#ff5252", "border": "1px solid #ff5252", "padding": "8px 20px", "fontFamily": "Courier", "cursor": "pointer", "fontWeight": "bold", "fontSize": "13px"}),
@@ -241,13 +241,13 @@ def do_clear(_):
     return "✓ All trades cleared", {"display": "none"}
 
 FILTERS = {
-    'pop'         : (80, None),
-    'max_loss'    : (None, -20000),
-    'max_profit'  : (500, None),
-    'delta'       : (-15, 0),
-    'theta'       : (10, None),
-    'vega'        : (None, 0),
-    'reward_risk' : (0.08, None),
+    'pop'         : (None, None),
+    'max_loss'    : (None, None),
+    'max_profit'  : (None, None),
+    'delta'       : (None, None),
+    'theta'       : (None, None),
+    'vega'        : (None, None),
+    'reward_risk' : (None, None),
 }
 
 @app.callback(Output("spread-pairs-tables", "children"), Input("interval", "n_intervals"))
@@ -257,7 +257,7 @@ def refresh_spread_pairs(_):
     if cs.raw_calls is None or cs.raw_calls.empty:
         return [html.P("Waiting for data...", style={"color": "#aaa"})]
     try:
-        candidates = cs.get_spread_candidates(FILTERS, max_margin=70000)
+        candidates = cs.get_spread_candidates(FILTERS, max_margin=100000)
     except Exception as e:
         return [html.P(f"Error: {e}", style={"color": "#ff5252", "fontFamily": "Courier"})]
     if not candidates:

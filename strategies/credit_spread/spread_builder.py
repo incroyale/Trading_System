@@ -143,12 +143,12 @@ def build_spread_candidates(candidates_by_expiry, days_to_expiry, filters, conne
 
 def get_margin(connection, sell_token, buy_token, qty=65):
     try:
-        resp = connection.getMargin(positions=[
+        resp = connection.getMarginApi({"positions":[
             {"exchange": "NFO", "qty": qty, "price": 0, "productType": "INTRADAY",
              "token": str(sell_token), "tradeType": "SELL", "orderType": "MARKET"},
             {"exchange": "NFO", "qty": qty, "price": 0, "productType": "INTRADAY",
              "token": str(buy_token), "tradeType": "BUY", "orderType": "MARKET"},
-        ])
+        ]})
         if resp.get("status"):
             return resp["data"]["totalMarginRequired"]
     except Exception as e:
