@@ -1,6 +1,5 @@
 # credit_spread/signals_india.py
 import pandas as pd
-from strategies.credit_spread.spread_builder import build_spread_candidates
 import datetime
 
 
@@ -14,7 +13,6 @@ class IndiaCreditSpreads:
         self.greeks_cache = None
         self.spread_tokens = []
         self.spread_latest = {}  # will be pointed at obj.latest from app.py
-        self.greeks_ready = False
 
     def load_from_pmcc(self, pmcc_raw_calls, min_dte=15, max_dte=45):
         today = pd.to_datetime('today').normalize()
@@ -94,12 +92,3 @@ class IndiaCreditSpreads:
             row['oi']         = tick.get('open_interest', 0)
             rows.append(row)
         return pd.DataFrame(rows)
-
-    def get_spread_candidates(self, filters: dict, max_margin=None):
-        candidates, dte_map = {}, {}
-        today = datetime.date.today()
-        for expiry, df in self.raw_calls.groupby('expiry'):
-            expiry_str = pd.to_datetime(expiry).strftime('%d %b %Y')
-            candidates[expiry_str] = df.reset_index(drop=True)
-            dte_map[expiry_str] = max((pd.to_datetime(expiry).date() - today).days, 1)
-        return build_spread_candidates(candidates, dte_map, filters)

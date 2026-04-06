@@ -5,6 +5,7 @@ from strategies.pmcc.signals_india import IndiaPMCC
 from strategies.credit_spread.signals_india import IndiaCreditSpreads
 from dashboard.portfolio import init_db, log_trade, get_trades, start_ltp_polling, clear_all_trades, get_total_pnl
 import pandas as pd
+import os, threading
 
 app = Dash(__name__)
 
@@ -30,6 +31,8 @@ def _patched_refresh():
         cs.get_filtered_dfs()
         cs.apply_greeks_filters(obj.greeks_cache)
 obj._refresh_greeks_cache = _patched_refresh
+
+os.makedirs("data", exist_ok=True)
 
 # ── portfolio db + polling ────────────────────────────────────────────────────
 init_db()
