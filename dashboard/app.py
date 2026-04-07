@@ -3,7 +3,8 @@ from dash import Dash, html, dcc, dash_table, ctx
 from dash.dependencies import Input, Output, State
 from strategies.pmcc.signals_india import IndiaPMCC
 from strategies.credit_spread.signals_india import IndiaCreditSpreads
-from dashboard.portfolio import init_db, log_trade, get_trades, start_ltp_polling, clear_all_trades, get_total_pnl
+from strategies.credit_spread.spread_builder import get_spreads
+from dashboard.portfolio import init_db, log_trade, close_trade, get_trades, start_ltp_polling, clear_all_trades, get_total_pnl
 import pandas as pd
 import os, threading
 
@@ -26,7 +27,7 @@ def _patched_refresh():
         _orig_refresh()
     except Exception as e:
         print(f"[greeks refresh] failed: {e}")
-        return  # bail early, don't touch cs at all
+        return
     if obj.greeks_cache is not None:
         cs.get_filtered_dfs()
         cs.apply_greeks_filters(obj.greeks_cache)
@@ -34,7 +35,6 @@ obj._refresh_greeks_cache = _patched_refresh
 
 os.makedirs("data", exist_ok=True)
 def _write_csv_loop():
-    # Manually delete for now
     while True:
         try:
             df = cs.get_tick_data()
@@ -58,7 +58,8 @@ start_ltp_polling(obj.connection, interval=2)
 COL_WIDTHS = {
     "token": 108, "strike": 96, "ltp": 96, "bid": 96, "ask": 96, "spread": 90,
     "day_volume": 120, "total_buy": 108, "total_sell": 108, "oi": 108,
-    "iv": 84, "delta": 84, "gamma": 84, "theta": 90, "vega": 84,}
+    "iv": 84, "delta": 84, "gamma": 84, "theta": 90, "vega": 84,
+}
 
 def make_columns(df):
     return [{"name": c, "id": c} for c in df.columns]
@@ -113,7 +114,7 @@ def trade_entry_panel():
         style={"backgroundColor": "#1a1a1a", "padding": "16px", "borderRadius": "8px", "border": "1px solid #333", "marginBottom": "24px", "display": "flex", "gap": "12px", "alignItems": "flex-end", "flexWrap": "wrap"},
         children=[
             input_box("Exchange",       "p-exchange", "NFO",     width="80px"),
-            input_box("Trading Symbol", "p-symbol",   "NIFTY", width="140px"),
+            input_box("Trading Symbol", "p-symbol",   "NIFTY",   width="140px"),
             input_box("Symbol Token",   "p-token",    "7000",    width="100px"),
             html.Button("BUY",  id="btn-buy",  n_clicks=0, style={"backgroundColor": "#1a3a1a", "color": "#00e676", "border": "1px solid #00e676", "padding": "8px 20px", "fontFamily": "Courier", "cursor": "pointer", "fontWeight": "bold", "fontSize": "13px"}),
             html.Button("SELL", id="btn-sell", n_clicks=0, style={"backgroundColor": "#3a1a1a", "color": "#ff5252", "border": "1px solid #ff5252", "padding": "8px 20px", "fontFamily": "Courier", "cursor": "pointer", "fontWeight": "bold", "fontSize": "13px"}),
@@ -123,6 +124,26 @@ def trade_entry_panel():
                 html.Button("YES, CLEAR", id="btn-clear-confirm", n_clicks=0, style={"backgroundColor": "#3a0000", "color": "#ff5252", "border": "1px solid #ff5252", "padding": "4px 12px", "fontFamily": "Courier", "cursor": "pointer", "fontSize": "12px"}),
             ]),
             html.Div(id="trade-status", style={"color": "#aaa", "fontFamily": "Courier", "fontSize": "13px", "alignSelf": "center"}),
+        ]
+    )
+
+def close_trade_panel():
+    return html.Div(
+        style={"backgroundColor": "#1a1a1a", "padding": "12px 16px", "borderRadius": "8px",
+               "border": "1px solid #333", "marginBottom": "16px",
+               "display": "flex", "gap": "12px", "alignItems": "flex-end", "flexWrap": "wrap"},
+        children=[
+            html.Div([
+                html.Label("Trade ID to Close", style={"color": "#aaa", "fontSize": "12px", "marginBottom": "4px", "display": "block"}),
+                dcc.Input(id="close-trade-id", placeholder="ID", type="number", debounce=False,
+                          style={"backgroundColor": "#111", "color": "white", "border": "1px solid #444",
+                                 "padding": "6px 8px", "fontFamily": "Courier", "fontSize": "13px", "width": "80px"}),
+            ]),
+            html.Button("CLOSE TRADE", id="btn-close-trade", n_clicks=0,
+                        style={"backgroundColor": "#1a1a2a", "color": "#7986cb",
+                               "border": "1px solid #7986cb", "padding": "8px 20px",
+                               "fontFamily": "Courier", "cursor": "pointer", "fontWeight": "bold", "fontSize": "13px"}),
+            html.Div(id="close-trade-status", style={"color": "#aaa", "fontFamily": "Courier", "fontSize": "13px", "alignSelf": "center"}),
         ]
     )
 
@@ -160,16 +181,25 @@ app.layout = html.Div(
                             html.H2("Candidate Credit Spread Legs", style={"color": "white", "marginBottom": "12px"}),
                             html.Div(id="cs-tables"),
                         ]),
+                # ── NEW: Bear Call Spreads tab ─────────────────────────────
+                dcc.Tab(label="Bear Call Spreads", value="bear-call-spreads", style=TAB_STYLE, selected_style=TAB_SELECTED,
+                        children=[
+                            html.H2("Bear Call Spreads", style={"color": "white", "marginBottom": "4px"}),
+                            html.P(id="spreads-last-updated", style={"color": "#555", "fontFamily": "Courier", "fontSize": "12px", "marginBottom": "16px"}),
+                            html.Div(id="spreads-tables"),
+                        ]),
                 dcc.Tab(label="Portfolio", value="portfolio", style=TAB_STYLE, selected_style=TAB_SELECTED,
                         children=[
                             html.H2("Paper Trade Portfolio", style={"color": "white", "marginBottom": "16px"}),
                             trade_entry_panel(),
+                            close_trade_panel(),
                             html.Div(id="portfolio-table"),
                             html.Div(id="portfolio-pnl", style={"marginTop": "20px", "padding": "16px 24px", "backgroundColor": "#1a1a1a", "borderRadius": "8px", "border": "1px solid #333", "display": "inline-block"}),
                         ]),
             ]
         ),
-        dcc.Interval(id="interval", interval=500, n_intervals=0),
+        dcc.Interval(id="interval",         interval=500,    n_intervals=0),
+        dcc.Interval(id="spreads-interval", interval=10_000, n_intervals=0),   # ← NEW
     ]
 )
 
@@ -195,6 +225,59 @@ def refresh_cs(_):
     df = df[[c for c in desired if c in df.columns]]
     format_expiry(df)
     return make_expiry_tables(df, "Credit Spread", "#a0e080")
+
+# ── NEW: Bear Call Spreads callback ───────────────────────────────────────────
+@app.callback(
+    Output("spreads-tables", "children"),
+    Output("spreads-last-updated", "children"),
+    Input("spreads-interval", "n_intervals"))
+def refresh_spreads(_):
+    import datetime
+    try:
+        df = get_spreads("data")
+    except Exception as e:
+        return [html.P(f"Error: {e}", style={"color": "#ff5252", "fontFamily": "Courier"})], ""
+
+    ts = datetime.datetime.now().strftime("Last updated: %H:%M:%S")
+
+    if df.empty:
+        return [html.P("No spreads match filters — waiting for CSVs in data/", style={"color": "#aaa"})], ts
+
+    # Optional: format expiry column nicely
+    if 'expiry' in df.columns:
+        try:
+            df['expiry'] = pd.to_datetime(df['expiry']).dt.strftime('%d %b %Y')
+        except Exception:
+            pass
+
+    # Colour-code reward_risk column
+    rr_conditional = [
+        {"if": {"filter_query": "{reward_risk} >= 0.3", "column_id": "reward_risk"}, "color": "#00e676"},
+        {"if": {"filter_query": "{reward_risk} < 0.3 && {reward_risk} >= 0.2", "column_id": "reward_risk"}, "color": "#ffab40"},
+    ]
+
+    table = dash_table.DataTable(
+        columns=[{"name": c, "id": c} for c in df.columns],
+        data=df.to_dict("records"),
+        style_table={"overflowX": "auto", "marginBottom": "10px"},
+        style_header={
+            "backgroundColor": "#222", "color": "#f9a825",
+            "fontWeight": "bold", "border": "1px solid #333", "whiteSpace": "nowrap",
+        },
+        style_cell={
+            "backgroundColor": "#111", "color": "white", "border": "1px solid #222",
+            "fontFamily": "Courier", "fontSize": "13px", "padding": "6px 10px",
+            "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis",
+        },
+        style_data_conditional=[
+            {"if": {"row_index": "odd"}, "backgroundColor": "#1a1a1a"},
+            *rr_conditional,
+        ],
+        sort_action="native",
+        page_size=50,
+    )
+
+    return [table], ts
 
 @app.callback(
     Output("trade-status", "children"),
@@ -253,6 +336,29 @@ def show_confirm(_):
 def do_clear(_):
     clear_all_trades()
     return "✓ All trades cleared", {"display": "none"}
+
+@app.callback(
+    Output("close-trade-status", "children"),
+    Input("btn-close-trade", "n_clicks"),
+    State("close-trade-id", "value"),
+    prevent_initial_call=True)
+def close_trade_cb(_, trade_id):
+    if trade_id is None:
+        return "⚠ Enter a trade ID"
+    try:
+        # fetch current ltp for that trade
+        import sqlite3
+        with sqlite3.connect("portfolio.db") as conn:
+            row = conn.execute(
+                "SELECT exchange, symbol, token FROM trades WHERE id=? AND status='OPEN'", (trade_id,)
+            ).fetchone()
+        if row is None:
+            return f"⚠ No open trade with ID {trade_id}"
+        ltp = obj.connection.ltpData(exchange=row[0], tradingsymbol=row[1], symboltoken=row[2])['data']['ltp']
+        close_trade(trade_id, ltp)
+        return f"✓ Closed trade #{trade_id} @ {ltp}"
+    except Exception as e:
+        return f"✗ {e}"
 
 if __name__ == "__main__":
     app.run(debug=False)
