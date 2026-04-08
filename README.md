@@ -1,4 +1,4 @@
 # Trading_System
 
-1) PMCC (Poor Man's Covered Call) 
+1) Put Credit Spread
 2) Call Credit Spread
