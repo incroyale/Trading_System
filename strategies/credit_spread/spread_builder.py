@@ -38,7 +38,7 @@ def get_call_spreads(
     lot_size: int         = 65,
 ) -> pd.DataFrame:
     """
-    Process all CE CSVs in dir_path (no _PE suffix), generate bear call spreads,
+    Process all CE CSVs in dir_path, generate bear call spreads,
     apply filters, and return a sorted DataFrame.
 
     Bear call spread mechanics
@@ -52,7 +52,7 @@ def get_call_spreads(
     all_results = []
 
     for filename in sorted(os.listdir(dir_path)):
-        if not filename.endswith('.csv') or filename.endswith('_PE.csv'):
+        if not filename.endswith('_CE.csv') or filename.endswith('_PE.csv'):
             continue
 
         filepath = os.path.join(dir_path, filename)
@@ -63,7 +63,7 @@ def get_call_spreads(
         expiry = (
             df['expiry'].iloc[0]
             if 'expiry' in df.columns
-            else filename.replace('.csv', '')
+            else filename.replace('_CE.csv', '')
         )
 
         for (_, short), (_, long) in combinations(df.iterrows(), 2):

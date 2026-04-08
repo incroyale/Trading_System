@@ -51,7 +51,7 @@ os.makedirs("data", exist_ok=True)
 def _write_csv_loop():
     """Write CE and PE leg CSVs to data/ every 15 s (only when greeks are ready)."""
     while True:
-        # ── CE legs ──────────────────────────────────────────────────────────
+        # ── CE ──────────────────────────────────────────────────────────
         try:
             df = cs.get_tick_data()
             if df is not None and not df.empty:
@@ -66,12 +66,12 @@ def _write_csv_loop():
                     for expiry, group in df.groupby('expiry'):
                         expiry_str = pd.to_datetime(expiry).strftime('%d_%b_%Y')
                         group.to_csv(
-                            os.path.join("data", f"{expiry_str}.csv"), index=False
+                            os.path.join("data", f"{expiry_str}_CE.csv"), index=False
                         )
         except Exception as e:
             print(f"[csv writer CE] {e}")
 
-        # ── PE legs ───────────────────────────────────────────────────────────
+        # ── PE ─────────────────────────────────────────────────────────────
         try:
             df_put = cs_put.get_tick_data()
             if df_put is not None and not df_put.empty:
