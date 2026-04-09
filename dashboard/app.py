@@ -500,7 +500,9 @@ def refresh_legs(_):
         pe_df = pe_df[[c for c in desired if c in pe_df.columns]]
         format_expiry(pe_df)
         pe_tables = make_expiry_tables(pe_df, "PE", "#ce93d8")
-
+    print(f"[debug] latest tick count: {len(obj.latest)}")
+    print(f"[debug] CE tokens subscribed: {len(cs.spread_tokens)}")
+    print(f"[debug] PE tokens subscribed: {len(cs_put.spread_tokens)}")
     return ce_tables, pe_tables
 
 
@@ -698,4 +700,9 @@ def close_trade_cb(_, trade_id):
 
 
 if __name__ == "__main__":
+    import shutil
+    if os.path.exists("data"):
+        shutil.rmtree("data")
+        os.makedirs("data")
+        print("data/ cleared.")
     app.run(debug=False)

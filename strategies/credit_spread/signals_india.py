@@ -50,20 +50,12 @@ class IndiaCreditSpreads:
         def is_valid_tick(tick):
             if not all(tick.get(k, 0) != 0 for k in LIQUIDITY_KEYS):
                 return False
-            sell_ok = sum(
-                1 for d in tick.get('best_5_sell_data', [])
-                if d['price'] != 0 and d['quantity'] != 0
-            ) >= 3
-            buy_ok = sum(
-                1 for d in tick.get('best_5_buy_data', [])
-                if d['price'] != 0 and d['quantity'] != 0
-            ) >= 3
+            sell_ok = sum(1 for d in tick.get('best_5_sell_data', []) if d['price'] != 0 and d['quantity'] != 0) >= 3
+            buy_ok = sum(1 for d in tick.get('best_5_buy_data', []) if d['price'] != 0 and d['quantity'] != 0) >= 3
             return sell_ok and buy_ok
 
         valid_tokens  = {t for t, tick in self.spread_latest.items() if is_valid_tick(tick)}
-        self.raw_calls = self._base_calls[
-            self._base_calls['token'].astype(str).isin(valid_tokens)
-        ].copy()
+        self.raw_calls = self._base_calls[self._base_calls['token'].astype(str).isin(valid_tokens)].copy()
 
     # ── Greeks + tick enrichment ──────────────────────────────────────────────
 
