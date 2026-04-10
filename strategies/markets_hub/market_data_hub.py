@@ -62,7 +62,7 @@ class IndiaMarketHub:
     # Universe Builder
     # ─────────────────────────────────────────────────────────────────────────
 
-    def build_universe(self, min_dte: int = 20, max_dte: int = 45):
+    def build_universe(self, min_dte: int = 20, max_dte: int = 50):
         """
         Download the Angel Broking scrip master and build:
           raw_calls — CE options for bear call spreads
