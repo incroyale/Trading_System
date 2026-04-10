@@ -1,0 +1,2 @@
+token,strike,expiry,ltp,bid,ask,spread,day_volume,oi,iv,delta,gamma,theta,vega
+41693,23000.0,2026-05-12,196.75,195.55,197.0,1.45,845,3510,22.17,-0.2371,0.0002,-6.9044,22.0029
