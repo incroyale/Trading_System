@@ -97,8 +97,8 @@ def _load_chart(filename: str) -> str | None:
     with open(path, "rb") as f:
         return "data:image/png;base64," + base64.b64encode(f.read()).decode()
 
-CHART_RV_VS_IV  = _load_chart(r"C:\Users\Lenovo\PycharmProjects\Trading_System\dashboard\data\nifty_vol_cone.png")
-CHART_VOL_CONE  = _load_chart(r"C:\Users\Lenovo\PycharmProjects\Trading_System\dashboard\data\nifty_vol_vs_vix.png")
+CHART_RV_VS_IV  = _load_chart("data/nifty_vol_cone.png")
+CHART_VOL_CONE  = _load_chart("data/nifty_vol_vs_vix.png")
 
 # ── Shared UI helpers ─────────────────────────────────────────────────────────
 COL_WIDTHS = {
@@ -526,7 +526,7 @@ def refresh_spreads(_):
     ts = datetime.datetime.now().strftime("Last updated: %H:%M:%S")
 
     try:
-        call_df = get_call_spreads(r"C:\Users\Lenovo\PycharmProjects\Trading_System\dashboard\data")
+        call_df = get_call_spreads("data")
     except Exception as e:
         call_tables = [html.P(f"Error: {e}", style={"color": "#ff5252", "fontFamily": "Courier"})]
     else:
@@ -542,7 +542,7 @@ def refresh_spreads(_):
             call_tables = [_spread_table(call_df, "#f9a825")]
 
     try:
-        put_df = get_put_spreads(r"C:\Users\Lenovo\PycharmProjects\Trading_System\dashboard\data")
+        put_df = get_put_spreads("data")
     except Exception as e:
         put_tables = [html.P(f"Error: {e}", style={"color": "#ff5252", "fontFamily": "Courier"})]
     else:
@@ -589,7 +589,7 @@ def log_trade_cb(buy_clicks, sell_clicks, exchange, symbol, token):
     Input("interval", "n_intervals"),
 )
 def refresh_portfolio(_):
-    df        = get_trades()
+    df = get_trades()
     raw_pnl   = get_total_pnl()
     total_pnl = raw_pnl * 65
     pnl_color = "#00e676" if total_pnl >= 0 else "#ff5252"
@@ -671,11 +671,12 @@ def close_trade_cb(_, trade_id):
         return "⚠ Enter a trade ID"
     try:
         import sqlite3
-        with sqlite3.connect(r"C:\Users\Lenovo\PycharmProjects\Trading_System\dashboard\portfolio.db") as conn:
+        with sqlite3.connect("data\portfolio.db") as conn:
             row = conn.execute("SELECT exchange, symbol, token FROM trades WHERE id=? AND status='OPEN'",(trade_id,),).fetchone()
         if row is None:
             return f"⚠ No open trade with ID {trade_id}"
-        ltp = obj.connection.ltpData(exchange=row[0], tradingsymbol=row[1], symboltoken=row[2])['data']['ltp']close_trade(trade_id, ltp)
+        ltp = obj.connection.ltpData(exchange=row[0], tradingsymbol=row[1], symboltoken=row[2])['data']['ltp']
+        close_trade(trade_id, ltp)
         return f"✓ Closed trade #{trade_id} @ {ltp}"
     except Exception as e:
         return f"✗ {e}"
