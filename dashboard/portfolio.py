@@ -2,7 +2,7 @@
 import sqlite3, threading, time
 import pandas as pd
 
-DB_PATH = "data\portfolio.db"
+DB_PATH = r"data/portfolio.db"
 _lock = threading.Lock()
 
 def init_db():
@@ -10,6 +10,7 @@ def init_db():
         conn.execute("""
             CREATE TABLE IF NOT EXISTS trades (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                spread_id   INTEGER,
                 exchange    TEXT,
                 symbol      TEXT,
                 token       TEXT,
@@ -28,6 +29,7 @@ def init_db():
             ("close_price", "REAL"),
             ("status",      "TEXT DEFAULT 'OPEN'"),
             ("max_profit",  "REAL"),
+            ("spread_id",   "INTEGER"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {defn}")
@@ -35,39 +37,40 @@ def init_db():
                 pass
 
 
-def log_trade(exchange, symbol, token, side, ltp):
+def log_trade(exchange, symbol, token, side, ltp, spread_id=None):
     """
     Insert a new trade row.
 
-    Pairing rule:
-      - Odd ID  → first leg of a spread; max_profit stays NULL until the counter leg arrives.
-      - Even ID → second leg of a spread; compute max_profit from this pair and
-                  write it back to BOTH rows immediately.
+    Pairing rule (spread_id based):
+      - First leg with a given spread_id → inserted with max_profit = NULL
+      - Second leg with the same spread_id → max_profit computed and written
+        to BOTH rows immediately.
 
-    max_profit = SELL-leg LTP − BUY-leg LTP  (net credit received per point)
-    Either leg can be entered first (BUY or SELL), the code detects which is which.
+    max_profit = SELL-leg ltp − BUY-leg ltp  (points, not ₹)
+    Either leg (BUY or SELL) can be entered first.
     """
     with _lock:
         with sqlite3.connect(DB_PATH) as conn:
             cur = conn.execute(
                 "INSERT INTO trades "
-                "(exchange, symbol, token, side, entry_price, ltp, pnl, max_profit, status) "
-                "VALUES (?,?,?,?,?,?,0,NULL,'OPEN')",
-                (exchange, symbol, token, side, ltp, ltp)
+                "(spread_id, exchange, symbol, token, side, entry_price, ltp, pnl, max_profit, status) "
+                "VALUES (?,?,?,?,?,?,?,0,NULL,'OPEN')",
+                (spread_id, exchange, symbol, token, side, ltp, ltp)
             )
             new_id = cur.lastrowid
 
-            # ── Even ID → pair is complete, calculate max_profit ──────────────
-            if new_id % 2 == 0:
-                partner_id = new_id - 1
+            # ── If spread_id given, check if partner leg already exists ────────
+            if spread_id is not None:
                 partner = conn.execute(
-                    "SELECT side, ltp FROM trades WHERE id=?", (partner_id,)
+                    "SELECT id, side, ltp FROM trades "
+                    "WHERE spread_id=? AND id!=? AND status='OPEN'",
+                    (spread_id, new_id)
                 ).fetchone()
 
                 if partner is not None:
-                    partner_side, partner_ltp = partner
+                    partner_id, partner_side, partner_ltp = partner
 
-                    # Identify which leg is SELL and which is BUY
+                    # Identify SELL and BUY leg
                     if side == "SELL":
                         sell_ltp = ltp
                         buy_ltp  = partner_ltp
