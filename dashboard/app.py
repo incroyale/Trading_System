@@ -10,7 +10,10 @@ import base64
 import os
 import threading
 import datetime
+from zoneinfo import ZoneInfo
 
+
+IST = ZoneInfo("Asia/Kolkata")
 app = Dash(__name__)
 
 # ── Time gates ────────────────────────────────────────────────────────────────
@@ -19,22 +22,22 @@ def _t(h, m):
 
 def in_portfolio_hours():
     """LTP polling + exit rules active: 9:15 – 15:30"""
-    now = datetime.datetime.now().time()
+    now = datetime.datetime.now(tz=IST).time()
     return _t(9, 15) <= now <= _t(15, 30)
 
 def in_signal_hours():
     """Greeks + CSV writer + spread builder active: 10:00 – 14:30"""
-    now = datetime.datetime.now().time()
+    now = datetime.datetime.now(tz=IST).time()
     return _t(10, 0) <= now <= _t(14, 30)
 
 def market_status():
-    now = datetime.datetime.now().time()
+    now = datetime.datetime.now(tz=IST).time()
     if _t(10, 0) <= now <= _t(14, 30):
         return "● Signals & Portfolio ACTIVE", "#00e676"
     elif _t(9, 15) <= now <= _t(15, 30):
         return "● Portfolio ACTIVE  |  Signals OFF (outside 10:00–14:30)", "#ffab40"
     else:
-        return "● Market CLOSED  |  UI only", "#555"
+        return f"● Market CLOSED  |  UI only", "#555"
 
 # ── Shared hub ────────────────────────────────────────────────────────────────
 obj = IndiaMarketHub()
