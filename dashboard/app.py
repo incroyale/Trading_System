@@ -4,13 +4,37 @@ from dash.dependencies import Input, Output, State
 from strategies.markets_hub.market_data_hub import IndiaMarketHub
 from strategies.credit_spread.signals_india import IndiaCreditSpreads, IndiaCreditSpreadsPut
 from strategies.credit_spread.spread_builder import get_call_spreads, get_put_spreads
-from dashboard.portfolio import init_db, log_trade, close_trade, get_trades, start_ltp_polling, clear_all_trades, get_total_pnl
+from dashboard.portfolio import init_db, log_trade, close_trade, get_trades, start_ltp_polling, clear_all_trades, get_total_pnl, DB_PATH
 import pandas as pd
 import base64
 import os
 import threading
+import datetime
 
 app = Dash(__name__)
+
+# ── Time gates ────────────────────────────────────────────────────────────────
+def _t(h, m):
+    return datetime.time(h, m)
+
+def in_portfolio_hours():
+    """LTP polling + exit rules active: 9:15 – 15:30"""
+    now = datetime.datetime.now().time()
+    return _t(9, 15) <= now <= _t(15, 30)
+
+def in_signal_hours():
+    """Greeks + CSV writer + spread builder active: 10:00 – 14:30"""
+    now = datetime.datetime.now().time()
+    return _t(10, 0) <= now <= _t(14, 30)
+
+def market_status():
+    now = datetime.datetime.now().time()
+    if _t(10, 0) <= now <= _t(14, 30):
+        return "● Signals & Portfolio ACTIVE", "#00e676"
+    elif _t(9, 15) <= now <= _t(15, 30):
+        return "● Portfolio ACTIVE  |  Signals OFF (outside 10:00–14:30)", "#ffab40"
+    else:
+        return "● Market CLOSED  |  UI only", "#555"
 
 # ── Shared hub ────────────────────────────────────────────────────────────────
 obj = IndiaMarketHub()
@@ -29,10 +53,12 @@ cs_put = IndiaCreditSpreadsPut(broker=obj.broker, connection=obj.connection)
 cs_put.load_universe(obj.raw_puts)
 cs_put.spread_latest = obj.latest
 
-# ── Patch greeks refresh ──────────────────────────────────────────────────────
+# ── Patch greeks refresh — only fires in signal hours ─────────────────────────
 _orig_refresh = obj._refresh_greeks_cache
 
 def _patched_refresh():
+    if not in_signal_hours():
+        return
     try:
         _orig_refresh()
     except Exception as e:
@@ -45,41 +71,42 @@ def _patched_refresh():
 
 obj._refresh_greeks_cache = _patched_refresh
 
-# ── CSV writers ───────────────────────────────────────────────────────────────
+# ── CSV writers — only run in signal hours ────────────────────────────────────
 def _write_csv_loop():
-    """Write CE and PE leg CSVs to data/ every 15 s (only when greeks are ready)."""
+    """Write CE and PE leg CSVs to data/ every 15 s (only when in signal hours)."""
     while True:
-        try:
-            df = cs.get_tick_data()
-            if df is not None and not df.empty:
-                if 'delta' not in df.columns or df['delta'].isna().all():
-                    print("[csv writer CE] greeks not ready, skipping")
-                else:
-                    desired = [
-                        'token', 'strike', 'expiry', 'ltp', 'bid', 'ask', 'spread',
-                        'day_volume', 'oi', 'iv', 'delta', 'gamma', 'theta', 'vega',
-                    ]
-                    df = df[[c for c in desired if c in df.columns]]
-                    for expiry, group in df.groupby('expiry'):
-                        expiry_str = pd.to_datetime(expiry).strftime('%d_%b_%Y')
-                        group.to_csv(os.path.join("data", f"{expiry_str}_CE.csv"), index=False)
-        except Exception as e:
-            print(f"[csv writer CE] {e}")
+        if in_signal_hours():
+            try:
+                df = cs.get_tick_data()
+                if df is not None and not df.empty:
+                    if 'delta' not in df.columns or df['delta'].isna().all():
+                        print("[csv writer CE] greeks not ready, skipping")
+                    else:
+                        desired = [
+                            'token', 'strike', 'expiry', 'ltp', 'bid', 'ask', 'spread',
+                            'day_volume', 'oi', 'iv', 'delta', 'gamma', 'theta', 'vega',
+                        ]
+                        df = df[[c for c in desired if c in df.columns]]
+                        for expiry, group in df.groupby('expiry'):
+                            expiry_str = pd.to_datetime(expiry).strftime('%d_%b_%Y')
+                            group.to_csv(os.path.join("data", f"{expiry_str}_CE.csv"), index=False)
+            except Exception as e:
+                print(f"[csv writer CE] {e}")
 
-        try:
-            df_put = cs_put.get_tick_data()
-            if df_put is not None and not df_put.empty:
-                if 'delta' not in df_put.columns or df_put['delta'].isna().all():
-                    print("[csv writer PE] greeks not ready, skipping")
-                else:
-                    desired = ['token', 'strike', 'expiry', 'ltp', 'bid', 'ask', 'spread',
-                        'day_volume', 'oi', 'iv', 'delta', 'gamma', 'theta', 'vega',]
-                    df_put = df_put[[c for c in desired if c in df_put.columns]]
-                    for expiry, group in df_put.groupby('expiry'):
-                        expiry_str = pd.to_datetime(expiry).strftime('%d_%b_%Y')
-                        group.to_csv(os.path.join("data", f"{expiry_str}_PE.csv"), index=False)
-        except Exception as e:
-            print(f"[csv writer PE] {e}")
+            try:
+                df_put = cs_put.get_tick_data()
+                if df_put is not None and not df_put.empty:
+                    if 'delta' not in df_put.columns or df_put['delta'].isna().all():
+                        print("[csv writer PE] greeks not ready, skipping")
+                    else:
+                        desired = ['token', 'strike', 'expiry', 'ltp', 'bid', 'ask', 'spread',
+                            'day_volume', 'oi', 'iv', 'delta', 'gamma', 'theta', 'vega',]
+                        df_put = df_put[[c for c in desired if c in df_put.columns]]
+                        for expiry, group in df_put.groupby('expiry'):
+                            expiry_str = pd.to_datetime(expiry).strftime('%d_%b_%Y')
+                            group.to_csv(os.path.join("data", f"{expiry_str}_PE.csv"), index=False)
+            except Exception as e:
+                print(f"[csv writer PE] {e}")
 
         threading.Event().wait(15)
 
@@ -87,7 +114,7 @@ threading.Thread(target=_write_csv_loop, daemon=True, name="csv-writer").start()
 
 # ── Portfolio DB + LTP polling ────────────────────────────────────────────────
 init_db()
-start_ltp_polling(obj.connection, interval=2)
+start_ltp_polling(obj.connection, interval=2, time_gate=in_portfolio_hours)
 
 # ── Load vol charts generated by pre_market.py at startup ────────────────────
 def _load_chart(filename: str) -> str | None:
@@ -97,8 +124,8 @@ def _load_chart(filename: str) -> str | None:
     with open(path, "rb") as f:
         return "data:image/png;base64," + base64.b64encode(f.read()).decode()
 
-CHART_RV_VS_IV  = _load_chart("nifty_vol_vs_vix.png")
-CHART_VOL_CONE  = _load_chart("nifty_vol_cone.png")
+CHART_RV_VS_IV = _load_chart("nifty_vol_vs_vix.png")
+CHART_VOL_CONE = _load_chart("nifty_vol_cone.png")
 
 # ── Shared UI helpers ─────────────────────────────────────────────────────────
 COL_WIDTHS = {
@@ -384,6 +411,9 @@ TAB_SELECTED = {"backgroundColor": "#1a1a1a", "color": "white", "border": "1px s
 app.layout = html.Div(
     style={"backgroundColor": "#111", "padding": "20px", "fontFamily": "Courier"},
     children=[
+        # ── Market status bar ─────────────────────────────────────────────────
+        html.Div(id="market-status-bar", style={"marginBottom": "16px"}),
+
         dcc.Tabs(
             id="tabs", value="cs-legs",
             style={"marginBottom": "20px"},
@@ -411,25 +441,19 @@ app.layout = html.Div(
                     label="Opportunities", value="opportunities",
                     style=TAB_STYLE, selected_style=TAB_SELECTED,
                     children=[
-
-                        # ── Vol charts (generated at startup by pre_market.py) ─
                         html.H3("Volatility Analysis",
                                 style={"color": "#aaa", "marginBottom": "16px",
                                        "fontWeight": "normal"}),
                         _chart_block(CHART_RV_VS_IV, "RV vs IV chart"),
                         _chart_block(CHART_VOL_CONE, "Vol cone chart"),
                         html.Hr(style={"borderColor": "#333", "margin": "28px 0"}),
-
-                        # ── Spread tables ─────────────────────────────────────
                         html.H2("Bear Call Spreads",
                                 style={"color": "white", "marginBottom": "4px"}),
                         html.P(id="call-spreads-last-updated",
                                style={"color": "#555", "fontFamily": "Courier",
                                       "fontSize": "12px", "marginBottom": "16px"}),
                         html.Div(id="call-spreads-tables"),
-
                         html.Hr(style={"borderColor": "#333", "margin": "32px 0"}),
-
                         html.H2("Bull Put Spreads",
                                 style={"color": "white", "marginBottom": "4px"}),
                         html.P(id="put-spreads-last-updated",
@@ -469,6 +493,15 @@ app.layout = html.Div(
 # ── Callbacks ─────────────────────────────────────────────────────────────────
 
 @app.callback(
+    Output("market-status-bar", "children"),
+    Input("interval", "n_intervals"),
+)
+def refresh_status_bar(_):
+    text, color = market_status()
+    return html.Span(text, style={"color": color, "fontFamily": "Courier", "fontSize": "13px"})
+
+
+@app.callback(
     Output("current-iv", "children"),
     Output("iv-rank",    "children"),
     Output("iv-pct",     "children"),
@@ -489,6 +522,11 @@ def refresh_iv_banner(_):
     Input("interval", "n_intervals"),
 )
 def refresh_legs(_):
+    if not in_signal_hours():
+        msg = [html.P("Signals inactive — active 10:00 to 14:30.",
+                      style={"color": "#555", "fontFamily": "Courier"})]
+        return msg, msg
+
     ce_df = cs.get_tick_data()
     if ce_df is None or ce_df.empty:
         ce_tables = [html.P("Waiting for CE data...", style={"color": "#aaa"})]
@@ -523,8 +561,12 @@ def refresh_legs(_):
     Input("spreads-interval", "n_intervals"),
 )
 def refresh_spreads(_):
-    import datetime
     ts = datetime.datetime.now().strftime("Last updated: %H:%M:%S")
+
+    if not in_signal_hours():
+        msg = [html.P("Spread builder inactive — active 10:00 to 14:30.",
+                      style={"color": "#555", "fontFamily": "Courier"})]
+        return msg, ts, msg, ts
 
     try:
         call_df = get_call_spreads("data")
@@ -679,7 +721,7 @@ def close_trade_cb(_, trade_id):
         return "⚠ Enter a trade ID"
     try:
         import sqlite3
-        with sqlite3.connect(DB_PATH = r"data\portfolio.db") as conn:
+        with sqlite3.connect(DB_PATH) as conn:
             row = conn.execute(
                 "SELECT exchange, symbol, token FROM trades WHERE id=? AND status='OPEN'",
                 (trade_id,)
