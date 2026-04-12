@@ -3,7 +3,7 @@ import os
 import signal
 import datetime
 from analytics.graphs import vol_cone, iv_vs_rv
-from analytics.telegram import notify
+from analytics.telegram import notify, send_eod_summary
 from zoneinfo import ZoneInfo
 
 
@@ -11,6 +11,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def on_stop(signum, frame):
     notify(f"🔴 Trading system stopped — {datetime.datetime.now(tz=IST).strftime('%H:%M:%S')} IST")
+    send_eod_summary()
     exit(0)
 
 signal.signal(signal.SIGTERM, on_stop)
@@ -20,7 +21,7 @@ signal.signal(signal.SIGINT, on_stop)
 with open("trading.pid", "w") as f:
     f.write(str(os.getpid()))
 
-# ── Pre-market ──────────────────────────────────────────────────────────────────────────
+# ── Pre-market ────────────────────────────────────────────────────────────────
 iv_vs_rv()
 vol_cone()
 
