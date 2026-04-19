@@ -29,7 +29,7 @@ def iv_vs_rv(window=20):
     ax.grid(axis="y", linewidth=0.4, alpha=0.6)
     ax.spines[["top", "right"]].set_visible(False)
     plt.tight_layout()
-    plt.savefig(r"data\nifty_vol_vs_vix.png", dpi=150)
+    plt.savefig("data/nifty_vol_vs_vix.png", dpi=150)
 
 
 def vol_cone(lookback=3):
@@ -88,7 +88,7 @@ def vol_cone(lookback=3):
     ax.grid(axis="y", linewidth=0.4, alpha=0.5)
     ax.spines[["top", "right"]].set_visible(False)
     plt.tight_layout()
-    plt.savefig(r"data\nifty_vol_cone.png", dpi=150)
+    plt.savefig("data/nifty_vol_cone.png", dpi=150)
 
 
 if __name__ == "__main__":

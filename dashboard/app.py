@@ -4,7 +4,11 @@ from dash.dependencies import Input, Output, State
 from strategies.markets_hub.market_data_hub import IndiaMarketHub
 from strategies.credit_spread.signals_india import IndiaCreditSpreads, IndiaCreditSpreadsPut
 from strategies.credit_spread.spread_builder import get_call_spreads, get_put_spreads
-from dashboard.portfolio import init_db, log_trade, close_trade, get_trades, start_ltp_polling, clear_all_trades, get_total_pnl, DB_PATH
+from dashboard.portfolio import (
+    init_db, log_trade, log_trade_params, close_trade, get_trades,
+    start_ltp_polling, clear_all_trades, get_total_pnl, DB_PATH,
+    get_open_tokens, get_next_spread_id
+)
 import pandas as pd
 import base64
 import os
@@ -37,7 +41,7 @@ def market_status():
     elif _t(9, 15) <= now <= _t(15, 30):
         return "● Portfolio ACTIVE  |  Signals OFF (outside 10:00–14:30)", "#ffab40"
     else:
-        return f"● Market CLOSED  |  UI only", "#555"
+        return "● Market CLOSED  |  UI only", "#555"
 
 # ── Shared hub ────────────────────────────────────────────────────────────────
 obj = IndiaMarketHub()
@@ -56,6 +60,162 @@ cs_put = IndiaCreditSpreadsPut(broker=obj.broker, connection=obj.connection)
 cs_put.load_universe(obj.raw_puts)
 cs_put.spread_latest = obj.latest
 
+
+# ── Auto-entry logic ──────────────────────────────────────────────────────────
+def _auto_enter_spreads():
+    """
+    Called after every Greeks refresh.
+    Enters all spreads from the signal filter that don't already have
+    their short or long token in an OPEN position.
+    Stores entry params in trade_params for research analysis.
+    """
+    try:
+        iv_rank = obj.iv_stats[1]  # iv_rank from the iv_stats tuple (iv, iv_rank, iv_pct)
+        open_tokens = get_open_tokens()
+
+        # ── Call spreads ──────────────────────────────────────────────────────
+        try:
+            call_df = get_call_spreads("data")
+        except Exception as e:
+            print(f"[auto-entry CE] spread builder error: {e}")
+            call_df = pd.DataFrame()
+
+        if not call_df.empty:
+            for _, row in call_df.iterrows():
+                short_token = str(row['short_token'])
+                long_token  = str(row['long_token'])
+
+                # Skip if either token already open
+                if short_token in open_tokens or long_token in open_tokens:
+                    continue
+
+                try:
+                    spread_id = get_next_spread_id()
+
+                    # Fetch LTPs
+                    short_ltp = obj.connection.ltpData(
+                        exchange="NFO", tradingsymbol=f"NIFTY{row['short_strike']:.0f}CE",
+                        symboltoken=short_token
+                    )['data']['ltp']
+                    long_ltp = obj.connection.ltpData(
+                        exchange="NFO", tradingsymbol=f"NIFTY{row['long_strike']:.0f}CE",
+                        symboltoken=long_token
+                    )['data']['ltp']
+
+                    # Log SELL leg first, BUY leg second
+                    log_trade("NFO", f"NIFTY{row['short_strike']:.0f}CE",
+                              short_token, "SELL", short_ltp, spread_id=spread_id)
+                    log_trade("NFO", f"NIFTY{row['long_strike']:.0f}CE",
+                              long_token, "BUY", long_ltp, spread_id=spread_id)
+
+                    # Store params for research
+                    dte = _calc_dte(row['expiry'])
+                    params = {
+                        'iv_rank':      iv_rank,
+                        'reward_risk':  row['reward_risk'],
+                        'short_delta':  row.get('net_delta', None),
+                        'dte':          dte,
+                        'short_strike': row['short_strike'],
+                        'long_strike':  row['long_strike'],
+                        'width':        row['width'],
+                        'net_credit':   row['net_credit'],
+                        'max_loss':     row['max_loss'],
+                        'pop':          row['pop'],
+                        'net_theta':    row['net_theta'],
+                        'net_vega':     row['net_vega'],
+                        'net_gamma':    row['net_gamma'],
+                    }
+                    log_trade_params(spread_id, "CE", params)
+
+                    # Update open tokens to prevent double entry in same cycle
+                    open_tokens.add(short_token)
+                    open_tokens.add(long_token)
+
+                    print(f"[auto-entry CE] spread {spread_id} entered — "
+                          f"short {row['short_strike']:.0f} @ {short_ltp}, "
+                          f"long {row['long_strike']:.0f} @ {long_ltp}")
+
+                except Exception as e:
+                    print(f"[auto-entry CE] failed to enter spread: {e}")
+
+        # ── Put spreads ───────────────────────────────────────────────────────
+        try:
+            put_df = get_put_spreads("data")
+        except Exception as e:
+            print(f"[auto-entry PE] spread builder error: {e}")
+            put_df = pd.DataFrame()
+
+        if not put_df.empty:
+            for _, row in put_df.iterrows():
+                short_token = str(row['short_token'])
+                long_token  = str(row['long_token'])
+
+                # Skip if either token already open
+                if short_token in open_tokens or long_token in open_tokens:
+                    continue
+
+                try:
+                    spread_id = get_next_spread_id()
+
+                    # Fetch LTPs
+                    short_ltp = obj.connection.ltpData(
+                        exchange="NFO", tradingsymbol=f"NIFTY{row['short_strike']:.0f}PE",
+                        symboltoken=short_token
+                    )['data']['ltp']
+                    long_ltp = obj.connection.ltpData(
+                        exchange="NFO", tradingsymbol=f"NIFTY{row['long_strike']:.0f}PE",
+                        symboltoken=long_token
+                    )['data']['ltp']
+
+                    # Log SELL leg first, BUY leg second
+                    log_trade("NFO", f"NIFTY{row['short_strike']:.0f}PE",
+                              short_token, "SELL", short_ltp, spread_id=spread_id)
+                    log_trade("NFO", f"NIFTY{row['long_strike']:.0f}PE",
+                              long_token, "BUY", long_ltp, spread_id=spread_id)
+
+                    # Store params for research
+                    dte = _calc_dte(row['expiry'])
+                    params = {
+                        'iv_rank':      iv_rank,
+                        'reward_risk':  row['reward_risk'],
+                        'short_delta':  row.get('net_delta', None),
+                        'dte':          dte,
+                        'short_strike': row['short_strike'],
+                        'long_strike':  row['long_strike'],
+                        'width':        row['width'],
+                        'net_credit':   row['net_credit'],
+                        'max_loss':     row['max_loss'],
+                        'pop':          row['pop'],
+                        'net_theta':    row['net_theta'],
+                        'net_vega':     row['net_vega'],
+                        'net_gamma':    row['net_gamma'],
+                    }
+                    log_trade_params(spread_id, "PE", params)
+
+                    # Update open tokens to prevent double entry in same cycle
+                    open_tokens.add(short_token)
+                    open_tokens.add(long_token)
+
+                    print(f"[auto-entry PE] spread {spread_id} entered — "
+                          f"short {row['short_strike']:.0f} @ {short_ltp}, "
+                          f"long {row['long_strike']:.0f} @ {long_ltp}")
+
+                except Exception as e:
+                    print(f"[auto-entry PE] failed to enter spread: {e}")
+
+    except Exception as e:
+        print(f"[auto-entry] unexpected error: {e}")
+
+
+def _calc_dte(expiry) -> int:
+    """Calculate days to expiry from expiry date string or datetime."""
+    try:
+        expiry_dt = pd.to_datetime(expiry).date()
+        return (expiry_dt - datetime.datetime.now(tz=IST).date()).days
+    except Exception:
+        return 0
+
+
 # ── Patch greeks refresh — only fires in signal hours ─────────────────────────
 _orig_refresh = obj._refresh_greeks_cache
 
@@ -71,6 +231,9 @@ def _patched_refresh():
     cs.apply_greeks_filters(obj.ce_greeks_cache)
     cs_put.get_filtered_dfs()
     cs_put.apply_greeks_filters(obj.pe_greeks_cache)
+
+    # ── Auto-enter all signals after each Greeks refresh ──────────────────────
+    _auto_enter_spreads()
 
 obj._refresh_greeks_cache = _patched_refresh
 
@@ -414,7 +577,6 @@ TAB_SELECTED = {"backgroundColor": "#1a1a1a", "color": "white", "border": "1px s
 app.layout = html.Div(
     style={"backgroundColor": "#111", "padding": "20px", "fontFamily": "Courier"},
     children=[
-        # ── Market status bar ─────────────────────────────────────────────────
         html.Div(id="market-status-bar", style={"marginBottom": "16px"}),
 
         dcc.Tabs(
@@ -423,7 +585,6 @@ app.layout = html.Div(
             colors={"background": "#111", "primary": "#00e5ff", "border": "#333"},
             children=[
 
-                # ── Tab 1: Credit Spread Legs ─────────────────────────────────
                 dcc.Tab(
                     label="Live Credit Spread", value="cs-legs",
                     style=TAB_STYLE, selected_style=TAB_SELECTED,
@@ -439,7 +600,6 @@ app.layout = html.Div(
                     ],
                 ),
 
-                # ── Tab 2: Opportunities ──────────────────────────────────────
                 dcc.Tab(
                     label="Opportunities", value="opportunities",
                     style=TAB_STYLE, selected_style=TAB_SELECTED,
@@ -466,7 +626,6 @@ app.layout = html.Div(
                     ],
                 ),
 
-                # ── Tab 3: Portfolio ──────────────────────────────────────────
                 dcc.Tab(
                     label="Portfolio", value="portfolio",
                     style=TAB_STYLE, selected_style=TAB_SELECTED,

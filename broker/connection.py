@@ -9,7 +9,7 @@ import threading
 load_dotenv()
 API_KEY   = os.getenv("API_KEY")
 CLIENT_CODE = os.getenv("CLIENT_CODE")
-PWD  = os.getenv("PWD")
+password  = os.getenv("password")
 TOTP_KEY  = os.getenv("TOTP_KEY")
 
 # ------------------ CONNECTION CLASS ------------------
@@ -26,7 +26,7 @@ class BrokerConnection:
     # ------------------ REST CONNECT ------------------
     def _connect_rest(self):
         self.client = SmartConnect(api_key=API_KEY)
-        session = self.client.generateSession(CLIENT_CODE, PWD, TOTP(TOTP_KEY).now())
+        session = self.client.generateSession(CLIENT_CODE, password, TOTP(TOTP_KEY).now())
         self.refreshToken = session['data']['refreshToken']
         self.authToken = session['data']['jwtToken']
         self.feedToken = self.client.getfeedToken()

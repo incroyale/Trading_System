@@ -2,7 +2,7 @@
 import sqlite3, threading, time
 import pandas as pd
 
-DB_PATH = r"data\portfolio.db"
+DB_PATH = "data/portfolio.db"
 _lock = threading.Lock()
 
 def init_db():
@@ -34,6 +34,29 @@ def init_db():
                 conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {defn}")
             except Exception:
                 pass
+
+        # ── Trade params table for research/backtesting ───────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trade_params (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                spread_id     INTEGER,
+                side          TEXT,
+                iv_rank       REAL,
+                reward_risk   REAL,
+                short_delta   REAL,
+                dte           INTEGER,
+                short_strike  REAL,
+                long_strike   REAL,
+                width         REAL,
+                net_credit    REAL,
+                max_loss      REAL,
+                pop           REAL,
+                net_theta     REAL,
+                net_vega      REAL,
+                net_gamma     REAL,
+                timestamp     TEXT DEFAULT (datetime('now','localtime'))
+            )
+        """)
 
 
 def log_trade(exchange, symbol, token, side, ltp, spread_id=None):
@@ -71,6 +94,58 @@ def log_trade(exchange, symbol, token, side, ltp, spread_id=None):
                     )
 
         return new_id
+
+
+def log_trade_params(spread_id, side, params: dict):
+    """
+    Store filter parameters at the time of trade entry for research analysis.
+    params dict keys: iv_rank, reward_risk, short_delta, dte, short_strike,
+                      long_strike, width, net_credit, max_loss, pop,
+                      net_theta, net_vega, net_gamma
+    """
+    with _lock:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("""
+                INSERT INTO trade_params
+                (spread_id, side, iv_rank, reward_risk, short_delta, dte,
+                 short_strike, long_strike, width, net_credit, max_loss,
+                 pop, net_theta, net_vega, net_gamma)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                spread_id,
+                side,
+                params.get('iv_rank'),
+                params.get('reward_risk'),
+                params.get('short_delta'),
+                params.get('dte'),
+                params.get('short_strike'),
+                params.get('long_strike'),
+                params.get('width'),
+                params.get('net_credit'),
+                params.get('max_loss'),
+                params.get('pop'),
+                params.get('net_theta'),
+                params.get('net_vega'),
+                params.get('net_gamma'),
+            ))
+
+
+def get_open_tokens() -> set:
+    """Return set of tokens currently in OPEN trades — used for duplicate prevention."""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT token FROM trades WHERE status='OPEN'"
+        ).fetchall()
+    return {r[0] for r in rows}
+
+
+def get_next_spread_id() -> int:
+    """Return max existing spread_id + 1, or 1 if no trades exist."""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(spread_id), 0) FROM trades"
+        ).fetchone()
+    return row[0] + 1
 
 
 def close_trade(trade_id, close_price):
@@ -112,7 +187,7 @@ def _check_exit_rules(conn, ltp_map):
     For every OPEN spread with both legs filled (max_profit not NULL),
     check combined PnL against exit rules:
       - Take profit : combined_pnl >= max_profit * 0.70
-      - Stop loss   : combined_pnl <= -(max_profit * 2.50)
+      - Stop loss   : combined_pnl <= -(max_profit * 2.00)
     Closes both legs at current LTP if triggered.
     """
     rows = conn.execute("""
@@ -137,7 +212,7 @@ def _check_exit_rules(conn, ltp_map):
         combined_pnl      = sum(leg["pnl"] for leg in legs)
         max_profit        = legs[0]["max_profit"]
         take_profit_level = max_profit * 0.70
-        stop_loss_level   = -(max_profit * 2.50)
+        stop_loss_level   = -(max_profit * 2.0)
 
         triggered = None
         if combined_pnl >= take_profit_level:

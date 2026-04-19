@@ -33,11 +33,13 @@ def send_eod_summary():
         else:
             lines = []
             for _, row in open_trades.iterrows():
-                lines.append(f"Spread {int(row['spread_id']) if pd.notna(row['spread_id']) else '?'} | "
+                lines.append(
+                    f"  Spread {int(row['spread_id']) if pd.notna(row['spread_id']) else '?'} | "
                     f"{row['side']} {row['symbol']} | "
                     f"Entry: {row['entry_price']} | "
                     f"LTP: {row['ltp']} | "
-                    f"PnL: {row['pnl']:.2f}pts")
+                    f"PnL: {row['pnl']:.2f}pts"
+                )
             open_msg = "\n".join(lines)
 
         sign = "+" if total_pnl >= 0 else ""

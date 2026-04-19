@@ -21,14 +21,14 @@ signal.signal(signal.SIGINT, on_stop)
 with open("trading.pid", "w") as f:
     f.write(str(os.getpid()))
 
-# ── Pre-market ────────────────────────────────────────────────────────────────
+# ── Pre-market ──────────────────────────────────────────────────────────────────────────
 iv_vs_rv()
 vol_cone()
 
 # ── Start dashboard ───────────────────────────────────────────────────────────
 notify(f"🟢 Trading system started — {datetime.datetime.now(tz=IST).strftime('%H:%M:%S')} IST")
 from dashboard.app import app
-app.run(debug=False)
+app.run(debug=False, host="0.0.0.0", port=8050)
 
 # ── Post-market (runs after app is stopped) ───────────────────────────────────
 notify(f"🔴 Trading system stopped — {datetime.datetime.now().strftime('%H:%M:%S')} IST")
